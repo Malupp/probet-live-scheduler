@@ -1,0 +1,36 @@
+name: Collect live observations
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: live-collector
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Collect current matches
+        env:
+          LIVE_CRON_SECRET: ${{ secrets.LIVE_CRON_SECRET }}
+        run: |
+          python - <<'PY'
+          import json,os,time,urllib.request
+          key=os.environ.get('LIVE_CRON_SECRET','')
+          if not key: raise SystemExit('Missing live scheduler secret')
+          deadline=time.monotonic()+240
+          while time.monotonic()<deadline:
+              started=time.monotonic()
+              request=urllib.request.Request('https://probet-api.vercel.app/api/jobs/live',headers={'Authorization':'Bearer '+key})
+              try:
+                  with urllib.request.urlopen(request,timeout=50) as response: data=json.load(response)
+              except Exception:
+                  print('Collection unavailable; no observation invented')
+                  break
+              rounds=data.get('sampled_rounds',[])
+              print('Sampled rounds:',rounds)
+              if not rounds: break
+              time.sleep(max(0,min(30-(time.monotonic()-started),deadline-time.monotonic())))
+          PY
