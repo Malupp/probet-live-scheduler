@@ -1,4 +1,4 @@
-name: Synchronize fantasy data
+name: Collect official fantasy votes
 on:
   schedule:
     - cron: '17 * * * *'
@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
-      - name: Check official votes and private league rosters
+      - name: Check shared official votes
         env:
           FANTASY_CRON_SECRET: ${{ secrets.FANTASY_CRON_SECRET }}
         run: |
@@ -21,11 +21,11 @@ jobs:
           key=os.environ.get('FANTASY_CRON_SECRET','')
           if not key: raise SystemExit('Missing fantasy scheduler secret')
           failed=False
-          for job in ('votes','league-sync'):
+          for job in ('votes',):
               request=urllib.request.Request('https://probet-api.vercel.app/api/jobs/'+job,headers={'Authorization':'Bearer '+key})
               try:
                   with urllib.request.urlopen(request,timeout=65) as response: data=json.load(response)
-                  print(job,json.dumps({k:data[k] for k in ('available','published','cooldown','round','imported','unmatched','manual_preserved','checked','succeeded','needs_reconnect') if k in data}))
+                  print(job,json.dumps({k:data[k] for k in ('available','published','cooldown','round','imported','unmatched','manual_preserved') if k in data}))
                   failed|=data.get('available') is False
               except Exception:
                   print(job,'temporarily unavailable; previous data retained')
