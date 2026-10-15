@@ -1,0 +1,30 @@
+name: Send ProBet Telegram notifications
+on:
+  schedule:
+    - cron: '4-59/5 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: telegram-notifications
+  cancel-in-progress: false
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Deliver due notifications
+        env:
+          TELEGRAM_CRON_SECRET: ${{ secrets.TELEGRAM_CRON_SECRET }}
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request
+          key=os.environ.get('TELEGRAM_CRON_SECRET','')
+          if not key:raise SystemExit('Missing Telegram scheduler secret')
+          request=urllib.request.Request('https://probet-api.vercel.app/api/jobs/telegram',
+              data=b'{}',method='POST',headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+          try:
+              with urllib.request.urlopen(request,timeout=50) as response:data=json.load(response)
+          except Exception:raise SystemExit('Telegram job unavailable; inspect private backend status')
+          counters=('prepared','sent','pending','expired','cancelled','unknown','failed')
+          print(json.dumps({k:int(data.get(k,0)) for k in counters}))
+          PY
