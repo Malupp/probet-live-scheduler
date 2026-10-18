@@ -3,7 +3,8 @@ on:
   schedule:
     - cron: '4-59/5 * * * *'
   workflow_dispatch:
-permissions: {}
+permissions:
+  actions: write
 concurrency:
   group: telegram-notifications
   cancel-in-progress: false
@@ -15,15 +16,31 @@ jobs:
       - name: Deliver due notifications
         env:
           TELEGRAM_CRON_SECRET: ${{ secrets.TELEGRAM_CRON_SECRET }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
-          import json,os,urllib.request
+          import json,os,urllib.request,urllib.error
           key=os.environ.get('TELEGRAM_CRON_SECRET','')
           if not key:raise SystemExit('Missing Telegram scheduler secret')
           request=urllib.request.Request('https://probet-api.vercel.app/api/jobs/telegram',
               data=b'{}',method='POST',headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
           try:
               with urllib.request.urlopen(request,timeout=50) as response:data=json.load(response)
+          except urllib.error.HTTPError as error:
+              try:detail=json.loads(error.read(65536)).get('detail')
+              except (ValueError,AttributeError):detail=None
+              if error.code==503 and isinstance(detail,dict) and detail.get('code')=='NEON_QUOTA_EXCEEDED':
+                  # Pause only this workflow; ordinary outages must remain visible.
+                  pause=urllib.request.Request('https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+
+                      '/actions/workflows/telegram.yml/disable',method='PUT',headers={
+                          'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+                  try:
+                      with urllib.request.urlopen(pause,timeout=15) as response:
+                          if response.status!=204:raise ValueError('Pause rejected')
+                  except Exception:raise SystemExit('Neon quota exhausted; automatic pause failed. Disable this workflow manually.')
+                  print('Neon quota exhausted: Telegram workflow paused. Re-enable after the quota resets.')
+                  raise SystemExit(0)
+              raise SystemExit('Telegram job unavailable; inspect private backend status')
           except Exception:raise SystemExit('Telegram job unavailable; inspect private backend status')
           counters=('prepared','sent','pending','expired','cancelled','unknown','failed')
           print(json.dumps({k:int(data.get(k,0)) for k in counters}))
